@@ -1,3 +1,6 @@
-# TODO: Write the example SetEnv entries.
+# Apache .htaccess config to ensure PHP has the necessary
+# environment variables available.
 
-#SetEnv
+SetEnv VOTING_DB_PATH '../voting.sqlite3'
+SetEnv PORKBUN_API_TOKEN ''
+SetEnv PORKBUN_SECRET_API_TOKEN ''

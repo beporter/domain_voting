@@ -10,29 +10,15 @@ declare(strict_types=1);
  * Deploying:
  *
  *     - Review and tune the `define()`s below.
- *     - Sign up for a Porkbun.com account, and generate an API token & secret. (Document them somewhere safe.)
- *     - Create an `.htaccess` file (or update your nginx.conf) with the following settings:
- *
- *         SetEnv PORKBUN_API_TOKEN "TOKEN_FROM_PB_ACCT"
- *         SetEnv PORKBUN_SECRET_API_TOKEN "SECRET_FROM_PB_ACCT"
- *         SetEnv VOTING_DB_PATH "../voting.sqlite3"
- *
- *     - Upload this file and the .htaccess file to your webhost.
- *     - Visit the URL for this script: https://your-domain.com/voting.php
+ *     - Then see: `deploy.sh`.
  *
  * To run/test locally:
  *
- *     - cd dir_with_this_script/
- *     - php -S localhost:8000
- *     - open http://localhost:8000/voting.php
+ *     - See `voting.sh`.
  *
- * Unit tests:
+ * Unit tests & Static analysis:
  *
- *     - TODO: Write a single PHPUnit file to test all classes. `phpunit.phar VotingTest.php`
- *
- * Static analysis:
- *
- *    `phpstan.phar analyse --memory-limit=1G voting.php`
+ *     - See `test.sh`.
  *
  * @author Brian Porter <beporter@users.sourceforge.net>
  * @copyright 2026 Brian Porter
@@ -110,8 +96,8 @@ define('RATE_LIMIT_DEFAULT_SECS', 10);
 define('PAGE_TITLE', 'Domain Suggestions & Voting');
 
 // Actual (semi-)secrets.
-define('PORKBUN_API_TOKEN', getenv('PORKBUN_API_TOKEN'));
-define('PORKBUN_SECRET_API_TOKEN', getenv('PORKBUN_SECRET_API_TOKEN'));
+define('PORKBUN_API_TOKEN', getenv('PORKBUN_API_TOKEN') ?: '');
+define('PORKBUN_SECRET_API_TOKEN', getenv('PORKBUN_SECRET_API_TOKEN') ?: '');
 
 /**
  * Debug helper method.
@@ -159,7 +145,6 @@ function dd(mixed ...$args): void
     error_log($fileLoc . PHP_EOL . $caller . PHP_EOL . $txt);
 
     // But only display on-screen and abort the script when DEBUG is enabled.
-    /** @phpstan-ignore if.alwaysTrue (Won't _always_ be true when the const is changed.) */
     if (DEBUG) {
         echo <<<EOM
             <h1>dd() called from {$fileLoc}</h1>
@@ -172,7 +157,6 @@ function dd(mixed ...$args): void
 }
 
 set_exception_handler(function (Throwable $e) {
-    /** @phpstan-ignore if.alwaysTrue (Won't _always_ be true when the const is changed.) */
     if (DEBUG) {
         dd(
             'Uncaught exception',
@@ -182,7 +166,6 @@ set_exception_handler(function (Throwable $e) {
         );
     }
 
-    /** @phpstan-ignore deadCode.unreachable (Same reasoning as above.) */
     Flash::error($e);
     header('Location: ?action=errors'); // Don't use any other Helpers here.
     exit;
@@ -501,7 +484,6 @@ class DB
         $this->addColumn('votes', 'enabled', 'BOOLEAN', true, true);
         // TODO: Add votes.availability_last_checked_at TIMESTAMP DEFAULT NULL
 
-        /** @phpstan-ignore foreach.emptyArray (It's okay if there are no migrations _yet_.) */
         foreach(self::MIGRATIONS as [$check, $migration]) {
             if ($this->db->querySingle($check)) {
                 $this->db->exec($migration);
@@ -578,16 +560,6 @@ class DB
         ');
         $stmt->bindValue(':id', $id, SQLITE3_INTEGER);
         $res = $stmt->execute();
-        return $this->voteResToDomain($res);
-    }
-
-    // TODO: Unused- remove.
-    public function getVoteRandom(): ?Domain
-    {
-        $res = $this->db->query('
-            SELECT * FROM votes ORDER BY random() LIMIT 1;
-        ');
-
         return $this->voteResToDomain($res);
     }
 
@@ -791,7 +763,7 @@ class DB
         $stmt->bindValue(':y', $d->year1_price, SQLITE3_FLOAT);
         $stmt->bindValue(':r', $d->renewal_price, SQLITE3_FLOAT);
         $stmt->bindValue(':n', $d->enabled, SQLITE3_INTEGER);
-        // @phpstan-ignore method.nonObject (execute may error but is unlikely to return false for us.)
+
         $stmt->execute()->finalize();
     }
 
@@ -1523,13 +1495,19 @@ class Pages
             string $pos,
             bool $show,
         ) use ($superButtons): string {
-            // TODO: When year1_price and/or renewal_price are present, display them.
+            $prices = '';
+            if ($d->year1_price > 0) {
+                $prices .= ' ' . Helper::badge("1️⃣ {$d->year1_price}");
+            }
+            if ($d->renewal_price > 0) {
+                $prices .= ' ' . Helper::badge("🔁 {$d->renewal_price}");
+            }
             return <<<EOB
                 <div class="position-relative flex-grow-1 flex-shrink-0" style="min-width: 49%;">
                     {$superButtons($d, $show)}
                     <input type="hidden" name="{$pos}" value="{$d->id}">
                     <button type="submit" name="winner" value="{$pos}" class="btn btn-block btn-primary fs-1 w-100 py-5 mb-3 shadow bg-gradient">
-                        {$d}
+                        {$d}{$prices}
                     </button>
                 </div>
             EOB;
@@ -1797,16 +1775,21 @@ class Pages
 
     protected function stats(): string
     {
+        $prefixCount = count(Config::read('PREFIXES'));
+        $keywordCount = $this->db->count('keywords', 'enabled IS TRUE');
+        $suffixCount = count(Config::read('SUFFIXES'));
+        $tldCount = count(Config::read('TLDS'));
         $data = [
-            'Prefix Count' => count(Config::read('PREFIXES')),
-            'Enabled Keyword Count' => $this->db->count('keywords', 'enabled IS TRUE'),
-            'Suffix Count' => count(Config::read('SUFFIXES')),
-            'TLD Count' => count(Config::read('TLDS')),
-            'Total Possible Permutations' => 'TODO',
+            'Prefix Count' => $prefixCount,
+            'Enabled Keyword Count' => $keywordCount,
+            'Suffix Count' => $suffixCount,
+            'TLD Count' => $tldCount,
+            'Total Possible Permutations' => $prefixCount * $keywordCount * $suffixCount * $tldCount,
             '--' => '--',
             'Enabled Suggested Domains Count' => $this->db->count('votes', 'enabled IS TRUE'),
             'Available Suggested Domains Count' => $this->db->count('votes', 'enabled IS TRUE AND available IS TRUE'),
             'Total Votes Cast' => $this->db->voteCountSum(),
+            // TODO: More options. Most expensive domain, least expensive domain, ???
         ];
 
         $rows = '';
@@ -1814,14 +1797,9 @@ class Pages
             $rows .= Helper::tr([$label, $value]);
         }
 
-        $rows = join("\n", $rows);
-
         return <<<EOHTML
             <h2>Assorted Statistics</h2>
-            <table class="table table-danger table-responsive-sm table-bordered table-striped table-hover caption-top my-3">
-                <caption class="pb-0">
-                    Domains in the local SQLite database that don't have a known availability or pricing.
-                </caption>
+            <table class="table table-responsive-sm table-bordered table-striped table-hover caption-top my-3">
                 <thead>
                     <tr><th scope="col">Stat</td><th scope="col">Value</td></tr>
                 </thead>
@@ -2329,7 +2307,7 @@ class Helper
         array $params = [],
     ): string
     {
-        $c = trim(implode(' ', $classes));
+        $c = mb_trim(implode(' ', $classes));
         $href = $url;
         if (count($params) > 0) {
             $href .= (str_contains($href, '?') ? '&' : '?') . http_build_query($params);
@@ -2338,6 +2316,13 @@ class Helper
         return mb_trim(<<<EOA
             <a href="{$href}" class="{$c}">{$title}</a>
         EOA);
+    }
+
+    public static function badge(string $content, string $class = 'secondary'): string
+    {
+        return mb_trim(<<<EOS
+            <span class="badge text-bg-{$class}">{$content}</span>
+        EOS);
     }
 
     /**

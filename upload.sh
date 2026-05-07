@@ -3,11 +3,17 @@
 
 set -eo pipefail
 
-# TODO: Accept an ssh config name to upload as command line args.
-SFTP_HOST=$1
-REMOTE_WEBROOT=''
-PUBLIC_WEBROOT=''
+SFTP_HOST="${1?'Provide the name of a configured ssh host as the first arg'}"
 
+if [ -r './.env' ]; then
+    echo "## Importing env vars."
+    source .env
+else
+    echo "## No .env file to import."
+    exit 1
+fi
+
+echo "## Uploading files."
 sftp -b - $SFTP_HOST <<-EOB
 	lpwd
 	lls -a
@@ -21,4 +27,7 @@ sftp -b - $SFTP_HOST <<-EOB
 	put voting.php
 EOB
 
-open "${PUBLIC_WEBROOT}/voting.php?action=vote&super=y"
+if [ -n "${PUBLIC_WEBROOT}" ]; then
+    echo "## Opening public URL."
+    open "${PUBLIC_WEBROOT}/voting.php?action=vote&super=y"
+fi

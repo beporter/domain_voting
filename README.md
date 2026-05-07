@@ -13,55 +13,56 @@ Features:
 
 Philosophy:
 
-* We've reached a point in software engineering where the majority of engineers are completely accustomed to 'complicated' tech stacks. [Composer](), [NPM](), [Docker Compose](), [install-php-extensions](), [Kubernetes](), [Terraform]()-- the list is nearly infinite.
+* We've reached a point in software engineering where the majority of engineers are completely accustomed to 'complicated' tech stacks. [Composer](https://getcomposer.org/), [NPM](https://www.npmjs.com/), [Docker Compose](https://docs.docker.com/compose/), [install-php-extensions](https://github.com/mlocati/docker-php-extension-installer), [Kubernetes](https://kubernetes.io/), [Terraform](https://developer.hashicorp.com/terraform)-- the list is nearly infinite.
 * All of these layers are justified for large projects, running at Google or Facebook scale.
 * But I think we jump to them too quickly, and just accept the pain and suffering they always incur without enjoying the benefits that make them worth the pain at scale.
 * So this script has zero build steps, zero PHP extension or Composer package dependencies, zero devops steps, a single "CI" script, and a single step deploy process involving a single file.
-* It's still fully unit tested, conforms to the PHP-FIG's [PER-3 standard](), is fully type hinted, and avoids the [OWASP Top 10]().
-* So my question to readers is: _Which 'best practices' actually matter for the smallest of projects, and which are [preemptive optimization]()?_
+* It's still fully unit tested, conforms to the PHP-FIG's [PER-3 standard](https://www.php-fig.org/per/coding-style/), is fully type hinted, and avoids the [OWASP Top 10](https://owasp.org/www-project-top-ten/).
+* So my question to readers is: _Which 'best practices' actually matter for the smallest of projects, and which are [premature optimization](https://en.wikipedia.org/wiki/Program_optimization#When_to_optimize)?_
 
 ## Requirements
 
 * A web server running PHP v8.5+.
 * An optional [Porkbun](https://porkbun.com) account for availability and pricing lookup.
 
-## Setup
-
-* Install PHP v8.5+ (Ex: `brew install php`)
-* Use the included `vothing.sh` wrapper script to launch a local copy of the script.
-* Visit the local URL listed.
-
 ## Support
 
-* Open a [GitHub Issue](). (No guarantees on availability to respond.)
+* Open a [GitHub Issue](https://github.com/beporter/domain_voting/issues). (No guarantees on availability to respond.)
+
+## Developer Setup
+
+* Install PHP v8.5+ (Ex: `brew install php`)
+* Use the included `./vothing.sh` wrapper script to launch a local copy of the script.
+* Visit the local URL listed.
 
 ## Development
 
-* Use `test.sh` to run a syntax check, static analysis, code sniffing, and unit tests.
+* Use `./test.sh` to run a syntax check, static analysis, code sniffing, and unit tests.
+* Open a [pull request](https://github.com/beporter/domain_voting/pulls) if you want, but remember the design philosophy! I won't be accepting refactors that introduce composer or additional complication without a well justified explanation of the benefits and trade offs.
 
-## TODO
+## Semi-automated deployment
 
-* Fill in empty README link URLs.
-* Set up example.env.
-* Adapt voting.sh to use an .env file.
-* Write test.sh to download phpunit.phar and use an .env file.
-* Update upload.sh to use .env and take an ssh host target. Document ssh config.
-* Modify voting.sh to call out to test.sh.
-* Get bash scripts to auto-fetch their dependent `.phar`s when not present in `tmp/`.
+1. Create an ssh config block for your web server.
 
-```conf
-# (Edit this block for your needs and add it to your `~/.ssh/config` file.
-#  Test that running `sftp voting-server` works.)
-Host voting-server
-    HostName ip.or.domain.name
-    Port 22
-    User your_user
-    #IdentityFile ~/.ssh/id_ed25519
-```
+    ```conf
+    # (Edit this block for your needs and add it to your `~/.ssh/config` file.
+    #  Test that running `sftp voting-server` works.)
+    Host voting-server
+        HostName ip.or.domain.name
+        Port 22
+        User your_user
+        #IdentityFile ~/.ssh/id_ed25519
+    ```
+
+1. Ensure your local `.env` has the `REMOTE_WEBROOT` and `PUBLIC_WEBROOT` values set correctly.
+1. Run `./deploy.sh`.
+
+## Semi-automated availability updates
 
 If your webhost is particularly slow, or strictly limits the total execution time, you may need to trigger availability and pricing updates repeatedly. This loop can run on a command line and will (eventually) get through `4 * 30` domains in the list.
 
 ```shell
+source .env
 for i in {1..30}; do
     echo "Loop #$i";
     curl -v \
@@ -69,12 +70,16 @@ for i in {1..30}; do
         -A 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:140.0) Gecko/20100101 Firefox/140.0' \
         -H 'Accept-Encoding: gzip, deflate' \
         -H 'Accept-Language: en-US,en;q=0.5' \
-        -H 'Referer: https://YOUR.DOMAIN.HERE/voting.php?action=update_availability' \
-        'https://YOUR.DOMAIN.HERE/voting.php?action=update_availability' ;
+        -H 'Referer: ${PUBLIC_WEBROOT}/voting.php?action=update_availability' \
+        "${PUBLIC_WEBROOT}/voting.php?action=update_availability" ;
         echo "Sleeping 1 min...";
         sleep 60;
 done
 ```
+
+## TODO
+
+* `deploy.sh` should use `envsubst` to populate `example-nginx.conf` and `example.htaccess` into `tmp/` with values injected from `.env`.
 
 ## License
 

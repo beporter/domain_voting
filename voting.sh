@@ -4,12 +4,17 @@
 
 set -eo pipefail
 
-export VOTING_DB_PATH='./tmp/voting.sqlite3'
-export PORKBUN_API_TOKEN=''
-export PORKBUN_SECRET_API_TOKEN=''
-# TODO: Replace above with `source .env`
+if [ -r './.env' ]; then
+    echo "## Importing env vars."
+    source .env
+else
+    echo "## No .env file to import."
+    #cp example.env .env
+fi
 
+echo "## Running tests."
 ./test.sh
 
-echo 'open http://localhost:8000/voting.php in your browser.'
+echo "## Starting local web server."
+echo '## open http://localhost:8000/voting.php in your browser.'
 php -S localhost:8000 -t ./
