@@ -27,6 +27,7 @@ Philosophy:
 
 ## Setup
 
+* Install PHP v8.5+ (Ex: `brew install php`)
 * Use the included `vothing.sh` wrapper script to launch a local copy of the script.
 * Visit the local URL listed.
 
@@ -47,6 +48,33 @@ Philosophy:
 * Update upload.sh to use .env and take an ssh host target. Document ssh config.
 * Modify voting.sh to call out to test.sh.
 * Get bash scripts to auto-fetch their dependent `.phar`s when not present in `tmp/`.
+
+```conf
+# (Edit this block for your needs and add it to your `~/.ssh/config` file.
+#  Test that running `sftp voting-server` works.)
+Host voting-server
+    HostName ip.or.domain.name
+    Port 22
+    User your_user
+    #IdentityFile ~/.ssh/id_ed25519
+```
+
+If your webhost is particularly slow, or strictly limits the total execution time, you may need to trigger availability and pricing updates repeatedly. This loop can run on a command line and will (eventually) get through `4 * 30` domains in the list.
+
+```shell
+for i in {1..30}; do
+    echo "Loop #$i";
+    curl -v \
+        -d '' \
+        -A 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:140.0) Gecko/20100101 Firefox/140.0' \
+        -H 'Accept-Encoding: gzip, deflate' \
+        -H 'Accept-Language: en-US,en;q=0.5' \
+        -H 'Referer: https://YOUR.DOMAIN.HERE/voting.php?action=update_availability' \
+        'https://YOUR.DOMAIN.HERE/voting.php?action=update_availability' ;
+        echo "Sleeping 1 min...";
+        sleep 60;
+done
+```
 
 ## License
 
