@@ -37,6 +37,7 @@ use \SQLite3Result;
 use \StdClass;
 use \Stringable;
 use \Throwable;
+use \Uri\WhatWg\Url;
 
 /**
  * Script config.
@@ -465,6 +466,8 @@ class DB
         $this->db = new SQLite3($path);
         $this->init();
         $this->migrations();
+        // Make sure the .sqlite3 file at $path gets written out at the end of the http request.
+        register_shutdown_function([$this, 'shutdown']);
     }
 
     private function init(): void
@@ -489,6 +492,11 @@ class DB
                 $this->db->exec($migration);
             }
         }
+    }
+
+    public function shutdown(): void
+    {
+        $this->db->close();
     }
 
     // == Keywords ==========
@@ -1542,7 +1550,7 @@ class Pages
             $rows = '';
             foreach ($leaders as $d) {
                 $rows .= Helper::tr([
-                    Helper::domainWithPriceLink($d),
+                    Helper::domainWithPriceLink((string)$d),
                     $d->vote_count,
                     $d->elo_score,
                 ], $d->available === true ? '' : 'table-warning');
@@ -1742,7 +1750,7 @@ class Pages
             $rows = '';
             foreach ($domainsLackingAvailability as $d) {
                 $rows .= Helper::tr([
-                    $d,
+                    (string)$d,
                     $d->vote_count,
                     $d->elo_score,
                 ]);
@@ -1930,6 +1938,7 @@ class PostDataProcessor
         $loser->elo_score = $loserNewElo;
         $this->db->updateVote($winner);
         $this->db->updateVote($loser);
+        dd($this->db->getVoteById($winner->id));
         [$winnerDiff, $loserDiff] = [$winnerNewElo - $winnerOldElo, $loserNewElo - $loserOldElo];
 
         Flash::add("
@@ -2283,12 +2292,17 @@ class Helper
      */
     public static function link(
         string $action,
-        string $title,
+        string $title = '',
         array $classes = ['secondary'],
         array $params = [],
     ): string
     {
-        return self::a(self::navUrl($action), $title, $classes, $params);
+        return self::a(
+            '?',
+            ($title ?: self::NAV[$action][0]),
+            $classes,
+            ['action' => $action] + $params,
+        );
     }
 
     /**
@@ -2308,13 +2322,17 @@ class Helper
     ): string
     {
         $c = mb_trim(implode(' ', $classes));
-        $href = $url;
+        $urlBase = new Url((($_SERVER['HTTPS'] ?? '') === 'on' ? 'https' : 'http') . '://' . $_SERVER['HTTP_HOST']);
+        $href = new Url($url, $urlBase);
+        print_r($href);
         if (count($params) > 0) {
-            $href .= (str_contains($href, '?') ? '&' : '?') . http_build_query($params);
+            $existing = [];
+            parse_str($href->getQuery(), $existing);
+            $href = $href->withQuery(http_build_query($params + $existing));
         }
 
         return mb_trim(<<<EOA
-            <a href="{$href}" class="{$c}">{$title}</a>
+            <a href="{$href->toUnicodeString()}" class="{$c}">{$title}</a>
         EOA);
     }
 
