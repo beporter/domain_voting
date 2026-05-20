@@ -6,7 +6,7 @@ set -eo pipefail
 
 if [ -r './.env' ]; then
     echo "## Importing env vars."
-    source .env
+    source './.env'
 else
     echo "## No .env file to import."
     #cp example.env .env
