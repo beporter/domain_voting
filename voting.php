@@ -24,7 +24,7 @@ declare(strict_types=1);
  * @copyright 2026 Brian Porter
  * @license proprietary
  * @version 1.0.0
- * @requires PHP v8.4+, ext-mb_string, ext-sqlite3
+ * @requires PHP v8.5+, ext-mb_string, ext-sqlite3
  */
 
 namespace Voting;
@@ -683,7 +683,7 @@ class DB
         );
     }
 
-    public function getVoteByDomainName(string $d): ?Domain
+    public function getVoteByDomainName(string|Stringable $d): ?Domain
     {
         $stmt = $this->prepare(<<<EOSQL
             SELECT *, (prefix || keyword || suffix || '.' || tld) AS name
@@ -692,7 +692,7 @@ class DB
             LIMIT 1
             ;
         EOSQL);
-        $stmt->bindValue(':n', $d, SQLITE3_TEXT);
+        $stmt->bindValue(':n', (string)$d, SQLITE3_TEXT);
         $res = $stmt->execute();
 
         return $this->voteResToDomain($res);
@@ -1116,10 +1116,18 @@ class PricingApi extends BaseJsonApi
     # Ref: https://porkbun.com/api/json/v3/documentation#tag/pricing/POST/pricing/get
     const API_BASE = 'https://api.porkbun.com/api/json/v3/';
 
-    public function __construct(
-        protected string $apiKey = '',
-        protected string $secretApiKey = '',
-    ) {}
+    protected string $apiKey;
+    protected string $secretApiKey;
+
+    public function __construct(string $apiKey, string $secretApiKey)
+    {
+        if (strlen($apiKey) == 0 || strlen($secretApiKey) == 0) {
+            throw new InvalidArgumentException('No api key or secret key available.');
+        }
+
+        $this->apiKey = $apiKey;
+        $this->secretApiKey = $secretApiKey;
+    }
 
     /**
      * Fetch generic pricing for provided top level domains.
@@ -1153,13 +1161,13 @@ class PricingApi extends BaseJsonApi
      * Fetch domain availability and pricing.
      *
      * @see https://porkbun.com/api/json/v3/documentation#tag/domain/POST/domain/checkDomain/{domain}
-     * @param string $d
+     * @param string|Stringable $d
      * @return array{available:bool,year1_price:float,renewal_price:float}
      */
-    public function getDomainPricing(string $d): array
+    public function getDomainPricing(string|Stringable $d): array
     {
         $res = $this->curl(
-            $this->url('domain/checkDomain/' . urlencode($d)),
+            $this->url('domain/checkDomain/' . urlencode((string)$d)),
             '',
             'POST'
         );
@@ -1569,7 +1577,7 @@ class Pages
             $rows = '';
             foreach ($leaders as $d) {
                 $rows .= Helper::tr([
-                    Helper::domainWithPriceLink((string)$d),
+                    Helper::domainWithPriceLink($d),
                     $d->vote_count,
                     $d->elo_score,
                 ], $d->available === true ? '' : 'table-warning');
@@ -1888,8 +1896,8 @@ class PostDataProcessor
         $this->db = new DB(Config::read('DB_FILE'));
         $this->gen = new DomainGen($this->db);
         $this->pricingApi = new PricingApi(
-            Config::read('PORKBUN_API_TOKEN') ?? '',
-            Config::read('PORKBUN_SECRET_API_TOKEN') ?? '',
+            Config::read('PORKBUN_API_TOKEN'),
+            Config::read('PORKBUN_SECRET_API_TOKEN'),
         );
     }
 
@@ -2090,10 +2098,14 @@ class PostDataProcessor
         $LIMIT = 20;
         // All in seconds.
         $AVG_CALL_DURATION = 15;
-        $DELAY = Config::read('RATE_LIMIT_DEFAULT_SECS');
+        $DELAY = (int)Config::read('RATE_LIMIT_DEFAULT_SECS');
 
         $domains = $this->db->domainsNeedingAvailability(); // TODO: Add a limit argument.
         if (count($domains) > $LIMIT) {
+            Flash::add(
+                sprintf('Processing the first %d domains. (%d total.)', $LIMIT, count($domains)),
+                'info',
+            );
             $domains = array_slice($domains, 0, $LIMIT);
         }
         // Try to avoid PHP's default 30sec execution time limit.
@@ -2106,28 +2118,28 @@ class PostDataProcessor
                 $domain->year1_price = $res['year1_price'];
                 $domain->renewal_price = $res['renewal_price'];
                 $this->db->updateVote($domain);
-                Flash::add(
-                    sprintf(
-                        'Availability updated for <code>%s</code> (<span class="badge text-bg-%s">%savailable</span>, 1st year: $%0.2f, Renewal: $%0.2f)',
-                        $domain,
-                        ($domain->available ? 'success' : 'info'),
-                        ($domain->available ? '' : 'not '),
-                        $domain->year1_price,
-                        $domain->renewal_price,
-                    ),
-                    'success',
+                $msg = sprintf(
+                    'Availability updated for <code>%s</code> (<span class="badge text-bg-%s">%savailable</span>, 1st year: %s, Renewal: %s)',
+                    $domain,
+                    ($domain->available ? 'success' : 'info'),
+                    ($domain->available ? '' : 'not '),
+                    Helper::currency($domain->year1_price),
+                    Helper::currency($domain->renewal_price),
                 );
+                $type = 'success';
             } else {
-                Flash::add(
-                    sprintf('Availability update failed for <code>%s</code> (%s: %s)',
-                        $domain,
-                        $res->code,
-                        $res->message,
-                    ),
-                    'danger',
+                $msg = sprintf('Availability update failed for <code>%s</code> (%s: %s)',
+                    $domain,
+                    $res->code,
+                    $res->message,
                 );
+                $type = 'danger';
             }
-            sleep($res['ttlRemaining'] ?? $DELAY); // Try to avoid rate limits.
+
+            Flash::add($msg, $type);
+            error_log(strip_tags($msg));
+
+            sleep(abs((int)$res['ttlRemaining']) ?? $DELAY); // Try to avoid rate limits.
         }
 
         return 'update_availability';
@@ -2393,13 +2405,14 @@ class Helper
         return "?{$query}";
     }
 
-    public static function domainWithPriceLink(string $domain): string
+    public static function domainWithPriceLink(string|Stringable $domain): string
     {
-        $url = sprintf(self::PRICE_LOOKUP_URL, $domain);
+        $d = (string)$domain;
+        $url = sprintf(self::PRICE_LOOKUP_URL, $d);
         $link = self::a($url, '$');
 
         return <<<EOP
-            <code>{$domain}</code> <span class="fw-lighter fst-italic">({$link})</span>
+            <code>{$d}</code> <span class="fw-lighter fst-italic">({$link})</span>
         EOP;
     }
 
