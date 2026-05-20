@@ -37,7 +37,7 @@ use \SQLite3Result;
 use \StdClass;
 use \Stringable;
 use \Throwable;
-use \Uri\WhatWg\Url;
+use \Uri\WhatWg\Url as WhatWgUrl;
 
 /**
  * Script config.
@@ -237,6 +237,23 @@ class Config {
             'mb_trim',
             array_unique(preg_split('/\n/', constant($key)) ?: []),
         );
+    }
+}
+
+/**
+ * Factory for WhatWg\Url, assumes a base URL based on $_SERVER vars.
+ */
+class Url
+{
+    public static function new(string $url): WhatWgUrl
+    {
+        $urlBase = new WhatWgUrl(
+            (($_SERVER['HTTPS'] ?? '') === 'on' ? 'https' : 'http')
+            . '://'
+            . $_SERVER['HTTP_HOST']
+            . $_SERVER['SCRIPT_NAME'],
+        );
+        return new WhatWgUrl($url, $urlBase);
     }
 }
 
@@ -2322,9 +2339,7 @@ class Helper
     ): string
     {
         $c = mb_trim(implode(' ', $classes));
-        $urlBase = new Url((($_SERVER['HTTPS'] ?? '') === 'on' ? 'https' : 'http') . '://' . $_SERVER['HTTP_HOST']);
-        $href = new Url($url, $urlBase);
-        print_r($href);
+        $href = Url::new($url);
         if (count($params) > 0) {
             $existing = [];
             parse_str($href->getQuery(), $existing);
