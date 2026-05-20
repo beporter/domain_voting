@@ -2301,6 +2301,7 @@ class Helper
             $action,
             $title,
             ['btn', 'btn-sm', 'btn-outline-dark', 'align-baseline'],
+            $_GET,
         );
     }
 
