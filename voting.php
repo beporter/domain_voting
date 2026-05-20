@@ -1520,18 +1520,20 @@ class Pages
             string $pos,
             bool $show,
         ) use ($superButtons): string {
-            $prices = '';
+            $prices = [];
             if ($d->year1_price > 0) {
-                $prices .= ' ' . Helper::badge("1️⃣ {$d->year1_price}");
+                $prices[] = "1️⃣ " . Helper::currency($d->year1_price);
             }
             if ($d->renewal_price > 0) {
-                $prices .= ' ' . Helper::badge("🔁 {$d->renewal_price}");
+                $prices[] = "🔁 " . Helper::currency($d->renewal_price);
             }
+            $prices = Helper::badge(implode('<br>', $prices));
+
             return <<<EOB
                 <div class="position-relative flex-grow-1 flex-shrink-0" style="min-width: 49%;">
                     {$superButtons($d, $show)}
                     <input type="hidden" name="{$pos}" value="{$d->id}">
-                    <button type="submit" name="winner" value="{$pos}" class="btn btn-block btn-primary fs-1 w-100 py-5 mb-3 shadow bg-gradient">
+                    <button type="submit" name="winner" value="{$pos}" class="position-relative btn btn-block btn-primary fs-1 w-100 py-5 mb-3 shadow bg-gradient">
                         {$d}{$prices}
                     </button>
                 </div>
@@ -2273,6 +2275,11 @@ class Helper
         EONAV;
     }
 
+    static function currency(float $value): string
+    {
+        return sprintf('$%.2f', $value);
+    }
+
     public static function p(string $content): string
     {
         return <<<EOP
@@ -2350,11 +2357,23 @@ class Helper
         EOA);
     }
 
-    public static function badge(string $content, string $class = 'secondary'): string
+    public static function badge(string $content, string $class = 'light'): string
     {
         return mb_trim(<<<EOS
-            <span class="badge text-bg-{$class}">{$content}</span>
-        EOS);
+            <span class="
+                position-absolute
+                top-0
+                end-0
+                badge
+                m-1
+                fs-6
+                fw-normal
+                fst-normal
+                lh-sm
+                text-start
+                text-bg-{$class}
+            ">{$content}</span>
+        EOS); // Note: No interstitial whitespace. `<span>  $content  </span>` == bad.
     }
 
     /**
