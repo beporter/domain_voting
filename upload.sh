@@ -27,12 +27,12 @@ sftp -b - $SFTP_HOST <<-EOB
 	lpwd
 	lls -a
 
-	cd $REMOTE_WEBROOT
+	@cd $REMOTE_WEBROOT
 	pwd
 	ls -a
 
-	put tmp/${SFTP_HOST}.htaccess .htaccess
-	put tmp/${SFTP_HOST}.sqlite3 ../voting.sqlite3
+	-put tmp/${SFTP_HOST}.htaccess .htaccess
+	-put tmp/${SFTP_HOST}.sqlite3 ../voting.sqlite3
 	put voting.php
 EOB
 
