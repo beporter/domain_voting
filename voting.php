@@ -2363,7 +2363,7 @@ class Helper
             <span class="
                 position-absolute
                 top-0
-                end-0
+                start-0
                 badge
                 m-1
                 fs-6
