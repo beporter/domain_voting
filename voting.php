@@ -1955,7 +1955,6 @@ class PostDataProcessor
         $loser->elo_score = $loserNewElo;
         $this->db->updateVote($winner);
         $this->db->updateVote($loser);
-        dd($this->db->getVoteById($winner->id));
         [$winnerDiff, $loserDiff] = [$winnerNewElo - $winnerOldElo, $loserNewElo - $loserOldElo];
 
         Flash::add("
@@ -2196,12 +2195,12 @@ class Helper
     const array NAV = [
         'vote' => ['🗳️ Vote', 'primary'],
         'leaderboard' => ['🏅 Leaderboard', 'info'],
+        'stats' => ['📊 Voting Stats', 'info'],
         'add_domain' => ['🔗 Add Domain', 'secondary'],
         'add_keyword' => ['🆕 Add Keyword', 'secondary'],
         // Make these "hidden" actions for now.
         // 'bulk_keywords' => ['📋 Add Many Keywords', 'warning'],
         // 'update_availability' => ['💵 Update Domain Availability and Pricing', 'warning'],
-        // 'stats' => ['📊 Voting Stats', 'info'],
     ];
 
     public static function h(string $s): string
