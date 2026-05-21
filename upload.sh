@@ -7,7 +7,7 @@ SFTP_HOST="${1?'Provide the name of a configured ssh host as the first arg'}"
 
 if [ -r './.env' ]; then
     echo "## Importing env vars."
-    source .env
+    set -a; source './.env'; set +a;
 else
     echo "## No .env file to import."
     exit 1

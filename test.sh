@@ -5,7 +5,9 @@
 set -eo pipefail
 
 export VOTING_DB_PATH='./tmp/voting-test.sqlite3'
-source .env
+if [ -r './.env' ]; then
+    set -a; source './.env'; set +a;
+fi
 
 if ! command -v php &>/dev/null; then
     echo "!! Couldn't find php in PATH. Please install php."

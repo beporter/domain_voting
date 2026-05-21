@@ -40,70 +40,27 @@ use \Throwable;
 use \Uri\WhatWg\Url as WhatWgUrl;
 
 /**
- * Script config.
+ * Define global default values where appropriate.
  *
- * Prefixes, suffixes and TLDs are hard-coded.
- * Keywords are stored in sqlite.
- *
- * We use plain string formatting instead of an array to make it easy to
- * copy/paste lists of prefixes/suffixes/tld's out of a spreadsheet and
- * in here. For prefixes and suffixes, make sure to include an empty
- * line if you want "no prefix" and/or "no suffix" to show up as an option.
- *
- * All of these lists should be sorted in descending order of preference,
- * with your most-preferred prefix/suffix/tld at the top.
+ * You don't need to change any of these-- they can be set in your
+ * local `.env` file.
  */
-define('PREFIXES', <<<'EOP'
+define('DEFAULT_PAGE_TITLE', 'Domain Suggestions & Voting');
+define('DEFAULT_LEADERBOARD_LIMIT', 20);
+define('DEFAULT_RATE_LIMIT_PAUSE_SECS', 10);
 
-gilded
-the
-your
-my
-EOP);
-
-define('SUFFIXES', <<<'EOS'
-
-park
-hall
-list
-bazaar
-glen
-EOS);
-
-define('TLDS', <<<'EOT'
-com
-app
-art
-auction
-co
-gallery
-EOT);
-
-define('DEBUG', true);
-
-define('DB_FILE', getenv('VOTING_DB_PATH') ?: __DIR__ . '/voting.sqlite3');
-define('BIAS_EXISTING_PROB', 0.9); // Chance to pick from DB vs random.
-define('PAIRWISE_PROB', 0.9); // Chance opponent comes from close ELO match in DB vs random.
-// For all of the below:
-// * (0 < value <= 1)
-// * lower values INCREASE bias towards the trait.
-define('ARRAY_WEIGHT_FACTOR', 0.6); // How heavily prefixes/suffixes/tlds are preferred at the top of the lists.
-define('VOTE_WEIGHT_FACTOR', 0.85); // How heavily higher vote counts influence random vote selection.
-define('ELO_WEIGHT_FACTOR', 0.9); // How heavily higher ELO scores influence random vote selection.
-define('YEAR1_WEIGHT_FACTOR', 0.95); // How heavily first-year prices influence random vote selection.
-define('RENEWAL_WEIGHT_FACTOR', 0.9); // How heavily renewal prices influence random vote selection.
-define('LEADERBOARD_LIMIT', 20);
-define('RATE_LIMIT_DEFAULT_SECS', 10);
-define('PAGE_TITLE', 'Domain Suggestions & Voting');
-
-// Actual (semi-)secrets.
-define('PORKBUN_API_TOKEN', getenv('PORKBUN_API_TOKEN') ?: '');
-define('PORKBUN_SECRET_API_TOKEN', getenv('PORKBUN_SECRET_API_TOKEN') ?: '');
+define('DEFAULT_PAIRWISE_PROB', 0.75);
+define('DEFAULT_BIAS_EXISTING_PROB', 0.75);
+define('DEFAULT_ARRAY_WEIGHT_FACTOR', 0.75);
+define('DEFAULT_VOTE_WEIGHT_FACTOR', 0.75);
+define('DEFAULT_ELO_WEIGHT_FACTOR', 0.75);
+define('DEFAULT_YEAR1_WEIGHT_FACTOR', 0.75);
+define('DEFAULT_RENEWAL_WEIGHT_FACTOR', 0.75);
 
 /**
  * Debug helper method.
  *
- * Prints all input args in a formatted <pre> tag, and exits the script.
+ * Prints all input args in a formatted <pre> tag, then exits the script.
  *
  * @param mixed ...$args
  * @return no-return
@@ -146,19 +103,19 @@ function dd(mixed ...$args): void
     error_log($fileLoc . PHP_EOL . $caller . PHP_EOL . $txt);
 
     // But only display on-screen and abort the script when DEBUG is enabled.
-    if (DEBUG) {
+    if ((bool)Config::read('DEBUG', false)) {
         echo <<<EOM
             <h1>dd() called from {$fileLoc}</h1>
             <h2>in {$caller}</h2>
             {$html}
         EOM;
-
-        exit(1);
     }
+
+    exit(1);
 }
 
 set_exception_handler(function (Throwable $e) {
-    if (DEBUG) {
+    if ((bool)Config::read('DEBUG', false)) {
         dd(
             'Uncaught exception',
             get_class($e),
@@ -174,7 +131,7 @@ set_exception_handler(function (Throwable $e) {
 
 /**
  * Thin configuration wrapper for easier management of backend data
- * (constants above).
+ * (constants, env vars, defaults, etc).
  */
 class Config {
     /**
@@ -184,12 +141,26 @@ class Config {
      */
     private static array $config = [];
 
-    public static function read(string $key): mixed
+    public static function read(string $key, mixed $default = null): mixed
     {
+        // If $key isn't already cached, try to load it.
         if (!array_key_exists($key, self::$config)) {
-            self::init($key);
+            try {
+                self::init($key);
+            // If it can't be loaded,
+            } catch (InvalidArgumentException $e) {
+                // and a default is provided,
+                if (!is_null($default)) {
+                    return $default; // return the provided default.
+                } elseif (defined("DEFAULT_{$key}")) { // Or use a `defined(DEFAULT_*)` if present,
+                    return constant("DEFAULT_{$key}");
+                } else {
+                    throw $e; // Otherwise this was a required config, with no global or call-time default, so throw.
+                }
+            }
         }
 
+        // Should be safe to return the existing value.
         return self::$config[$key];
     }
 
@@ -215,14 +186,31 @@ class Config {
     }
 
     /**
-     * Import a constant into the internal cache.
+     * Import a config value into the internal cache.
+     *
+     * Use whatever backing storage is appropriate. A wrapper around the
+     * lower-level `load_define` and `load_env` helpers. Prefers env vars
+     * but also checks defined PHP constants as a fallback for backwards
+     * compatibility. Calls to load() without a $default are treated as
+     * required, and throw an InvalidArgumentException when the key can't
+     * be found.
      *
      * @param string $key
      * @return mixed
+     * @throws InvalidArgumentException When the requested $key can't be located.
      */
     protected static function load(string $key): mixed
     {
-        return constant($key);
+        if (defined($key)) { // Backwards compat.
+            return constant($key);
+        } elseif (array_key_exists($key, getenv())) { // Then check env.
+            return getenv($key);
+        } else { // And throw if all those fail.
+            throw new InvalidArgumentException(mb_trim(
+                "Requested config value {$key} not found. Must be `define()`d
+                in PHP or available as an environment variable via `getenv()`."
+            ));
+        }
     }
 
     /**
@@ -235,7 +223,7 @@ class Config {
     {
         return array_map(
             'mb_trim',
-            array_unique(preg_split('/\n/', constant($key)) ?: []),
+            array_unique(preg_split('/\n/', self::load($key)) ?: []),
         );
     }
 }
@@ -431,6 +419,8 @@ class Domain implements Stringable
  */
 class DB
 {
+    const DEFAULT_DB_FILE = __DIR__ . '/voting.sqlite3';
+
     /**
      * ONLY the initial schema lives here. ALL changes must go in
      * MIGRATIONS to facilitate in-place upgrades.
@@ -478,9 +468,9 @@ class DB
 
     private SQLite3 $db;
 
-    public function __construct(string $path)
+    public function __construct(?string $path = null)
     {
-        $this->db = new SQLite3($path);
+        $this->db = new SQLite3($path ?? self::DEFAULT_DB_FILE);
         $this->init();
         $this->migrations();
         // Make sure the .sqlite3 file at $path gets written out at the end of the http request.
@@ -1478,7 +1468,7 @@ class Pages
 
     public function __construct()
     {
-        $this->db = new DB(Config::read('DB_FILE'));
+        $this->db = new DB(Config::read('VOTING_DB_PATH', null));
         $this->gen = new DomainGen($this->db);
     }
 
@@ -1906,11 +1896,11 @@ class PostDataProcessor
 
     public function __construct()
     {
-        $this->db = new DB(Config::read('DB_FILE'));
+        $this->db = new DB(Config::read('VOTING_DB_PATH', null));
         $this->gen = new DomainGen($this->db);
         $this->pricingApi = new PricingApi(
-            Config::read('PORKBUN_API_TOKEN'),
-            Config::read('PORKBUN_SECRET_API_TOKEN'),
+            Config::read('PORKBUN_API_TOKEN', ''),
+            Config::read('PORKBUN_SECRET_API_TOKEN', ''),
         );
     }
 
@@ -2111,7 +2101,7 @@ class PostDataProcessor
         $LIMIT = 20;
         // All in seconds.
         $AVG_CALL_DURATION = 15;
-        $DELAY = (int)Config::read('RATE_LIMIT_DEFAULT_SECS');
+        $DELAY = (int)Config::read('RATE_LIMIT_PAUSE_SECS');
 
         $totalCount = $this->db->count('votes', '
             enabled IS TRUE
