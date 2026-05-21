@@ -824,9 +824,23 @@ class DB
      *
      * @return list<Domain>
      */
-    public function domainsNeedingAvailability(): array
+    public function domainsNeedingAvailability($order = 'alpha', $limit = 1000): array
     {
-        $stmt = $this->prepare('
+        switch ($order) {
+            case 'elo_score':
+                $order = 'elo_score DESC';
+                break;
+
+            case 'vote_count':
+                $order = 'vote_count DESC';
+                break;
+
+            case 'alpha':
+            default:
+                $order = '(prefix || keyword || suffix || tld) ASC';
+                break;
+        }
+        $stmt = $this->prepare("
             SELECT *
             FROM votes
             WHERE enabled IS TRUE
@@ -835,15 +849,14 @@ class DB
                     OR year1_price IS NULL
                     OR renewal_price IS NULL
                 )
-            ORDER BY (prefix || keyword || suffix || tld) ASC
-            LIMIT 100
+            ORDER BY {$order}
+            LIMIT {$limit}
             ;
-        ');
+        ");
         $res = $stmt->execute();
 
         return $this->resultCollection($res, fn($v) => Domain::fromPost($v));
     }
-
 
     public function vetoDomain(int $id): bool
     {
@@ -1771,7 +1784,7 @@ class Pages
      */
     protected function update_availability(array $args): string
     {
-        $domainsLackingAvailability = $this->db->domainsNeedingAvailability();
+        $domainsLackingAvailability = $this->db->domainsNeedingAvailability('alpha', 5000);
         $submitDisabled = '';
         if (count($domainsLackingAvailability) > 0) {
             $rows = '';
@@ -2100,10 +2113,18 @@ class PostDataProcessor
         $AVG_CALL_DURATION = 15;
         $DELAY = (int)Config::read('RATE_LIMIT_DEFAULT_SECS');
 
-        $domains = $this->db->domainsNeedingAvailability(); // TODO: Add a limit argument.
-        if (count($domains) > $LIMIT) {
+        $totalCount = $this->db->count('votes', '
+            enabled IS TRUE
+            AND (
+                available IS NULL
+                OR year1_price IS NULL
+                OR renewal_price IS NULL
+            )
+        ');
+        $domains = $this->db->domainsNeedingAvailability('elo_score', $LIMIT);
+        if ($totalCount > $LIMIT) {
             Flash::add(
-                sprintf('Processing the first %d domains. (%d total.)', $LIMIT, count($domains)),
+                sprintf('Processing the first %d domains. (%d total.)', $LIMIT, $totalCount),
                 'info',
             );
             $domains = array_slice($domains, 0, $LIMIT);
