@@ -1390,7 +1390,7 @@ class DomainGen
         return $items[ min((int)floor($index), $n - 1) ];
     }
 
-    protected function rowWeight(Domain $d): float
+    public function rowWeight(Domain $d): float
     {
         // Avoid runaway growth on votes (log dampening).
         $votes = pow(1 + $d->vote_count, $this->factor('VOTE_WEIGHT_FACTOR'));
@@ -1975,6 +1975,8 @@ class PostDataProcessor
             <code>{$winner}</code> wins (📈 +{$winnerDiff})!
             <code>{$loser}</code> loses (📉 {$loserDiff}).
         ", 'info');
+        Flash::streak();
+
         return 'vote';
     }
 
@@ -2166,8 +2168,6 @@ class PostDataProcessor
  */
 class Flash
 {
-    // TODO: Gamify voting by showing a running "streak" total. `if (_SESSION[streak_count]++ % 100 == 0) Flash::add(streak_count streak!)`
-
     /**
      * Retrieve all set flash messages and clear them.
      *
@@ -2206,6 +2206,21 @@ class Flash
             'msg' => $e->getMessage(),
             'trace' => $e->getTraceAsString(),
         ];
+    }
+
+    public static function streak(): void
+    {
+        $PERIOD = 25;
+
+        if (!array_key_exists('streak_count', $_SESSION)) {
+            $_SESSION['streak_count'] = 1;
+        }
+
+        if ($_SESSION['streak_count'] % $PERIOD == 0) {
+            Flash::add("You're on a {$_SESSION['streak_count']} vote streak! 🥳", 'success');
+        }
+
+        $_SESSION['streak_count']++;
     }
 }
 
