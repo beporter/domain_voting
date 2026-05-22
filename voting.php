@@ -536,11 +536,12 @@ class DB
     public function addKeyword(string $kw, string $desc = ''): bool
     {
         $stmt = $this->prepare('
-            INSERT OR IGNORE INTO keywords(keyword, description)
-            VALUES (:k, :d);
+            INSERT OR IGNORE INTO keywords(keyword, description, enabled)
+            VALUES (:k, :d, :e);
         ');
         $stmt->bindValue(':k', mb_trim($kw), SQLITE3_TEXT);
         $stmt->bindValue(':d', mb_trim(strip_tags($desc)), SQLITE3_TEXT);
+        $stmt->bindValue(':e', true, SQLITE3_INTEGER);
         return (bool)$stmt->execute();
     }
 
