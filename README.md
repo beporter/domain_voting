@@ -18,7 +18,7 @@ Philosophy:
 * But I think we jump to them too quickly, and just accept the pain and suffering they always incur without enjoying the benefits that make them worth the pain at scale.
 * So this script has zero build steps, zero PHP extension or Composer package dependencies, zero devops steps, a single "CI" script, and a single step deploy process involving a single file.
 * It's still fully unit tested, conforms to the PHP-FIG's [PER-3 standard](https://www.php-fig.org/per/coding-style/), is fully type hinted, and avoids the [OWASP Top 10](https://owasp.org/www-project-top-ten/).
-* So my question to readers is: _Which 'best practices' actually matter for the smallest of projects, and which are [premature optimization](https://en.wikipedia.org/wiki/Program_optimization#When_to_optimize)?_
+* So my question to readers is: _Which 'best practices' actually matter for the smallest of projects, and which are habitual, self-inflicted [premature optimization](https://en.wikipedia.org/wiki/Program_optimization#When_to_optimize)?_
 
 ## Requirements
 

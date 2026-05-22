@@ -174,7 +174,7 @@ class Config {
 
             // Remove blanks from TLDs.
             case 'TLDS':
-                $raw = array_filter(self::loadList($key));
+                $raw = array_values(array_filter(self::loadList($key)));
                 break;
 
             default:
@@ -221,9 +221,13 @@ class Config {
      */
     protected static function loadList(string $key): array
     {
-        return array_map(
-            'mb_trim',
-            array_unique(preg_split('/\n/', self::load($key)) ?: []),
+        return array_values(
+            array_map(
+                'mb_trim',
+                array_unique(
+                    preg_split('/\n/', self::load($key)) ?: []
+                ),
+            )
         );
     }
 }
@@ -447,6 +451,7 @@ class DB
                 -- year1_price (in addColumn below)
                 -- renewal_price (in addColumn below)
                 -- enabled (in addColumn below)
+                -- weight_cached (in addColumn below)
                 UNIQUE(prefix, keyword, suffix, tld)
             );
         EOT,
@@ -460,13 +465,20 @@ class DB
      * @var array<array{0:string, 1:string}> MIGRATIONS
      */
     const array MIGRATIONS = [
-        // [
-        //     "SELECT NOT EXISTS (SELECT null FROM pragma_table_info('your_table_here') WHERE name = 'your_col_here');",
-        //     "ALTER TABLE your_table_here ADD COLUMN your_col_here BOOL NOT NULL DEFAULT FALSE;"
-        // ],
+        [
+            "SELECT NOT EXISTS (SELECT null FROM pragma_index_list('votes') WHERE name = 'idx_votes_weight_cached');",
+            "CREATE INDEX idx_votes_weight_cached ON votes(weight_cached);",
+        ],
     ];
 
     private SQLite3 $db;
+
+    /**
+     * Centralized place for caching expensive query results within a single http request.
+     * 
+     * @var array<string,array<mixed>>
+     */
+    private array $cached = [];
 
     public function __construct(?string $path = null)
     {
@@ -492,6 +504,7 @@ class DB
         $this->addColumn('keywords', 'description', 'TEXT', false, "''");
         $this->addColumn('keywords', 'enabled', 'BOOLEAN', true, true);
         $this->addColumn('votes', 'enabled', 'BOOLEAN', true, true);
+        $this->addColumn('votes', 'weight_cached', 'REAL', false, 0.0);
         // TODO: Add votes.availability_last_checked_at TIMESTAMP DEFAULT NULL
 
         foreach(self::MIGRATIONS as [$check, $migration]) {
@@ -587,27 +600,27 @@ class DB
      */
     public function getVoteBiasedRandom(array $excludeIds = []): ?Domain
     {
-        $where = '';
+        $excludes = '';
         if (count($excludeIds)) {
             $qs = implode(', ', array_fill(0, count($excludeIds), '?'));
-            $where = <<<EOW
+            $excludes = <<<EOW
                 AND id NOT IN ({$qs})
             EOW;
         }
 
         // Bias toward higher ELO using weighted randomness
         $stmt = $this->prepare("
-            SELECT *, (abs(random()) / 9223372036854775807.0) * elo_score AS score
+            SELECT *
             FROM votes
             WHERE available IS NOT FALSE
                 AND enabled IS TRUE
-            {$where}
-            ORDER BY score DESC
+            {$excludes}
+            ORDER BY -LOG(ABS(RANDOM()) / 9223372036854775808.0) / weight_cached  -- 2^63
             LIMIT 1
             ;
         ");
 
-        if ($where) {
+        if ($excludes) {
             foreach ($excludeIds as $i) {
                 $stmt->bindValue('?', (int)$i, SQLITE3_INTEGER);
             }
@@ -689,6 +702,13 @@ class DB
         return $this->voteResToDomain($res);
     }
 
+    public function getVotes(): array
+    {
+        $stmt = $this->prepare('SELECT * FROM votes ORDER BY id LIMIT 1000;');
+        $res = $stmt->execute();
+        return $this->resultCollection($res, fn($v) => Domain::fromPost($v));
+    }
+
     public function voteCount(): int
     {
         return $this->count('votes');
@@ -697,6 +717,53 @@ class DB
     public function voteCountSum(): int
     {
         return (int)$this->db->querySingle('SELECT SUM(vote_count) FROM votes;');
+    }
+
+    public function voteP95s(): array
+    {
+        if (is_array($this->cached['voteP95s'])) {
+            return $this->cached['voteP95s'];
+        }
+
+        $columns = ['vote_count', 'elo_score', 'year1_price', 'renewal_price'];
+        $withCol = function (string $col): string {
+            return <<<EOR
+                {$col}, ROW_NUMBER() OVER (ORDER BY {$col}) AS {$col}_row
+            EOR;
+        };
+        $selectClause = function (string $col): string {
+            $PERCENTILE = 0.95;
+            return <<<EOS
+                (SELECT {$col} FROM ranked
+                    WHERE {$col}_row >= total_rows * {$PERCENTILE}
+                    ORDER BY {$col}_row LIMIT 1
+                ) AS {$col}_p95
+            EOS;
+        };
+
+        $withSql = implode(', ', array_map($withCol, $columns));
+        $selectsSql = implode(', ', array_map($selectClause, $columns));
+        $stmt = $this->prepare(<<<EOQ
+            WITH ranked AS (
+                SELECT {$withSql}, 
+                COUNT(*) OVER () AS total_rows 
+                FROM votes
+            )
+            SELECT {$selectsSql}
+            ;
+        EOQ);
+        $res = $stmt->execute();
+
+        return $this->cached['voteP95s'] = $this->resultCollection($res);
+    }
+
+    public function votesRefreshP95s(): void
+    {
+        $gen = new DomainGen($this);
+        foreach ($this->getVotes() as $d) {
+            $d->weight_cached = $gen->rowWeight($d);
+            $this->updateVote($d);
+        }
     }
 
     public function addDomain(Domain $d): ?Domain
@@ -712,6 +779,7 @@ class DB
             $d->year1_price,
             $d->renewal_price,
             $d->enabled,
+            $d->weight_cached,
         );
     }
 
@@ -726,15 +794,16 @@ class DB
         ?float $year1Price = null,
         ?float $renewalPrice = null,
         bool $enabled = true,
+        float $weightCached = 0.0,
     ): ?Domain
     {
         $stmt = $this->prepare(<<<EOS
             INSERT INTO votes(prefix, keyword, suffix, tld, vote_count,
-                elo_score, available, year1_price, renewal_price, enabled)
-            VALUES(:p, :k, :s, :t, :v, :e, :a, :y, :r, :n)
+                elo_score, available, year1_price, renewal_price, enabled, weight_cached)
+            VALUES(:p, :k, :s, :t, :v, :e, :a, :y, :r, :n, :w)
             ON CONFLICT(prefix, keyword, suffix, tld) DO
-            NOTHING  -- A combination coming up as a candidate, by chance, repeatedly, doesn't constitute a "vote" for it.
-            -- UPDATE SET vote_count = vote_count + 1
+                NOTHING  -- A combination coming up as a candidate, by chance, repeatedly, doesn't constitute a "vote" for it.
+                -- UPDATE SET vote_count = vote_count + 1
             ;
         EOS);
         $stmt->bindValue(':p', $prefix, SQLITE3_TEXT);
@@ -747,6 +816,7 @@ class DB
         $stmt->bindValue(':y', $year1Price, SQLITE3_FLOAT);
         $stmt->bindValue(':r', $renewalPrice, SQLITE3_FLOAT);
         $stmt->bindValue(':n', $enabled, SQLITE3_INTEGER);
+        $stmt->bindValue(':w', $weightCached, SQLITE3_FLOAT);
         $res = $stmt->execute();
 
         return $this->getVote($prefix, $keyword, $suffix, $tld);
@@ -765,7 +835,8 @@ class DB
                 available = :a,
                 year1_price = :y,
                 renewal_price = :r,
-                enabled = :n
+                enabled = :n,
+                weight_cached = :w
             WHERE id = :id;
         ');
         $stmt->bindValue(':id', $d->id, SQLITE3_INTEGER);
@@ -779,6 +850,7 @@ class DB
         $stmt->bindValue(':y', $d->year1_price, SQLITE3_FLOAT);
         $stmt->bindValue(':r', $d->renewal_price, SQLITE3_FLOAT);
         $stmt->bindValue(':n', $d->enabled, SQLITE3_INTEGER);
+        $stmt->bindValue(':w', $d->weight_cached, SQLITE3_FLOAT);
 
         $stmt->execute()->finalize();
     }
@@ -885,7 +957,7 @@ class DB
         }
 
         $null = ($null ? '' : 'NOT NULL');
-        $default = ($default ? "DEFAULT {$default}" : '');
+        $default = (!is_null($default) ? "DEFAULT {$default}" : '');
         $q = "ALTER TABLE {$table} ADD COLUMN {$name} {$type} {$null} {$default};";
         return $this->db->exec($q);
     }
@@ -1251,7 +1323,7 @@ class DomainGen
         $excludes = $a?->id ? [$a->id] : [];
 
         // Select second candidate.
-        if ($this->probability(Config::read('PAIRWISE_PROB'))) {
+        if ($this->probability((float)Config::read('PAIRWISE_PROB'))) {
             $b = $this->pickCandidate($excludes);
         } else {
             $b = $this->generateCandidate();
@@ -1261,7 +1333,7 @@ class DomainGen
     }
 
     /**
-     * Either pick a DB vote entry, or generate a weighted random selection.
+     * Either pick a DB vote entry, or generate a weighted random combination.
      *
      * @param array<int> $excludeIds
      * @return Domain|null
@@ -1269,10 +1341,10 @@ class DomainGen
     protected function pickCandidate(array $excludeIds = []): ?Domain
     {
         if (
-            $this->probability(Config::read('BIAS_EXISTING_PROB'))
+            $this->probability((float)Config::read('BIAS_EXISTING_PROB'))
             && $this->db->voteCount() > count($excludeIds)
-            //&& ($vote = $this->db->getVoteBiasedRandom(array_filter($excludeIds)))
-            && ($vote = $this->pickWeightedCandidate(array_filter($excludeIds)))
+            && ($vote = $this->db->getVoteBiasedRandom(array_filter($excludeIds))) // weighted_cache > random > limit 1.
+            //&& ($vote = $this->pickWeightedCandidate(array_filter($excludeIds))) // select large pool > run logic from it.
         ) {
             return $vote;
         }
@@ -1282,7 +1354,7 @@ class DomainGen
     }
 
     /**
-     * Incorporate all availble weighting signals to pick a DB votes entry.
+     * Incorporate all available weighting signals to pick a DB votes entry.
      *
      * @param array<int> $excludeIds
      * @return Domain|null
@@ -1378,7 +1450,7 @@ class DomainGen
             throw new InvalidArgumentException('Array must not be empty.');
         }
 
-        $f = Config::read('ARRAY_WEIGHT_FACTOR');
+        $f = (float)Config::read('ARRAY_WEIGHT_FACTOR');
         $r = mt_rand() / mt_getrandmax();
 
         if ($f == 1.0) {
@@ -1392,21 +1464,25 @@ class DomainGen
 
     public function rowWeight(Domain $d): float
     {
-        // Avoid runaway growth on votes (log dampening).
-        $votes = pow(1 + $d->vote_count, $this->factor('VOTE_WEIGHT_FACTOR'));
+        $epsilon = 0.0001;
+        $transformers = [
+            'vote_count' => fn($v, $p) => log(1 + max($v, 0)) / log(1 + max($p, $epsilon)),
+            'elo_score' => fn($v, $p) => min(max($v / max($p, $epsilon), 0.0), 1.0),
+            'year1_price' =>   fn($v, $p) => 1.0 - min(max(($v ?? 100.0) / max($p, $epsilon), 0.0), 1.0),
+            'renewal_price' => fn($v, $p) => 1.0 - min(max(($v ?? 100.0) / max($p, $epsilon), 0.0), 1.0),
+        ];
 
-        // Normalize ELO.
-        $elo = exp($this->factor('ELO_WEIGHT_FACTOR') * $d->elo_score);
+        $p95s = $this->db->voteP95s();
+        $calc = function(string $field) use ($d, $p95s, $transformers, $epsilon) {
+            $raw = $transformers[$field]($d->$field, $p95s[$field] ?? 1.0);
+            $raw = max($raw, $epsilon);
+            return pow($raw, (float)Config::read(strtoupper($field) . '_FACTOR', 1.0));
+        };
 
-        // Bias toward smaller prices.
-        $year1Price = exp(
-            -$this->factor('YEAR1_WEIGHT_FACTOR') * abs($d->year1_price ?? 100)
-        );
-        $renewalPrice = exp(
-            -$this->factor('RENEWAL_WEIGHT_FACTOR') * abs($d->renewal_price ?? 100)
-        );
+        $weights = array_map($calc, array_keys($transformers));
+        $result = array_product($weights) ** (1 / count($weights));
 
-        return $votes * $elo * $year1Price * $renewalPrice;
+        return min(max($result, 0.0), 1.0);
     }
 
     /**
@@ -1437,7 +1513,7 @@ class DomainGen
 
     protected function factor(string $key): float
     {
-        return 1.0 / (Config::read($key) ?? 1.0);
+        return 1.0 / ((float)Config::read($key, 1.0));
     }
 }
 
@@ -1966,7 +2042,9 @@ class PostDataProcessor
         // Update the entities.
         $winner->elo_score = $winnerNewElo;
         $winner->vote_count += 1;
+        $winner->weight_cached = $this->gen->rowWeight($winner);
         $loser->elo_score = $loserNewElo;
+        $loser->weight_cached = $this->gen->rowWeight($loser);
         $this->db->updateVote($winner);
         $this->db->updateVote($loser);
         [$winnerDiff, $loserDiff] = [$winnerNewElo - $winnerOldElo, $loserNewElo - $loserOldElo];
@@ -2131,6 +2209,7 @@ class PostDataProcessor
                 $domain->available = $res['available'];
                 $domain->year1_price = $res['year1_price'];
                 $domain->renewal_price = $res['renewal_price'];
+                $domain->weight_cached = $this->gen->rowWeight($domain);
                 $this->db->updateVote($domain);
                 $msg = sprintf(
                     'Availability updated for <code>%s</code> (<span class="badge text-bg-%s">%savailable</span>, 1st year: %s, Renewal: %s)',
