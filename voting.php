@@ -2553,6 +2553,12 @@ class Helper
  * main()
  */
 
+// TODO: Don't execute code when being `include()`d, just let the classes above be defined.
+// if (in_array(__FILE__, get_included_files())) { // This returns TRUE even when the script is the direct target of a web request.
+//     return;
+// }
+// See also: `php_sapi_name() == 'cli'`
+
 session_start();
 
 $action = $_GET['action'] ?? 'vote';
