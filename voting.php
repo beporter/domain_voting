@@ -61,18 +61,19 @@ define('DEFAULT_RENEWAL_WEIGHT_FACTOR', 0.75);
 /**
  * Debug helper method.
  *
- * Prints all input args in a formatted <pre> tag, then exits the script.
+ * Prints all input args in a formatted <pre> tag.
  *
  * @param mixed ...$args
- * @return no-return
  */
-function dd(mixed ...$args): void
+function d(mixed ...$args): void
 {
     $block = function ($i, $v) {
         $v = htmlspecialchars($v);
         return <<<EOB
-            <h3>Argument [{$i}]</h3>
-            <pre><code>{$v}</code></pre>
+            <section>
+                <h3>Argument [{$i}]</h3>
+                <pre><code>{$v}</code></pre>
+            </section>
         EOB;
     };
 
@@ -106,12 +107,26 @@ function dd(mixed ...$args): void
     // But only display on-screen and abort the script when DEBUG is enabled.
     if ((bool)Config::read('DEBUG', false)) {
         echo <<<EOM
-            <h1>dd() called from {$fileLoc}</h1>
-            <h2>in {$caller}</h2>
-            {$html}
+            <article>
+                <h1>d() called from {$fileLoc}</h1>
+                <h2>in {$caller}</h2>
+                {$html}
+            </article>
         EOM;
     }
+}
 
+/**
+ * Debug helper method.
+ *
+ * Prints all input args in a formatted <pre> tag, then exits the script.
+ *
+ * @param mixed ...$args
+ * @return no-return
+ */
+function dd(mixed ...$args): void
+{
+    d(...$args);
     exit(1);
 }
 
