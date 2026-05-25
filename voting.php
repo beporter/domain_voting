@@ -1339,7 +1339,7 @@ class DomainGen
         $excludes = $a?->id ? [$a->id] : [];
 
         // Select second candidate.
-        if ($this->probability((float)Config::read('PAIRWISE_PROB'))) {
+        if ($this->probability((float)Config::read('PAIRWISE_PROB'))) { // TODO: This needs to take into account what proportion of all possible permutations are already in the `votes` table. When almost all combinations are in the DB, it becomes very difficult/unlikely to generate a new one that ISN'T in the DB already. 
             $b = $this->pickCandidate($excludes);
         } else {
             $b = $this->generateCandidate();
