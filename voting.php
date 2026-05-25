@@ -48,6 +48,7 @@ use \Uri\WhatWg\Url as WhatWgUrl;
 define('DEFAULT_PAGE_TITLE', 'Domain Suggestions & Voting');
 define('DEFAULT_LEADERBOARD_LIMIT', 20);
 define('DEFAULT_RATE_LIMIT_PAUSE_SECS', 10);
+define('DEFAULT_DISPLAY_PRICES', true);
 
 define('DEFAULT_PAIRWISE_PROB', 0.75);
 define('DEFAULT_BIAS_EXISTING_PROB', 0.75);
@@ -1609,10 +1610,10 @@ class Pages
             bool $show,
         ) use ($superButtons): string {
             $prices = [];
-            if ($d->year1_price > 0) {
+            if ($d->year1_price > 0 && (bool)Config::read('DISPLAY_PRICES')) {
                 $prices[] = "1️⃣ " . Helper::currency($d->year1_price);
             }
-            if ($d->renewal_price > 0) {
+            if ($d->renewal_price > 0 && (bool)Config::read('DISPLAY_PRICES')) {
                 $prices[] = "🔁 " . Helper::currency($d->renewal_price);
             }
             $prices = Helper::badge(implode('<br>', $prices));
