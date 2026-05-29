@@ -241,7 +241,7 @@ class Config {
             array_map(
                 'mb_trim',
                 array_unique(
-                    preg_split('/\n/', self::load($key)) ?: []
+                    preg_split('/(\n|\|)/', self::load($key)) ?: []
                 ),
             )
         );
