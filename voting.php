@@ -2036,9 +2036,8 @@ class PostDataProcessor
                 && $this->db->vetoDomain((int)$vetoDomainId)
             ) {
                 Flash::add("Domain ID <code>{$vetoDomainId}</code> has been disabled.", 'info');
+                return 'vote';
             }
-
-            return 'vote';
         }
 
         // Process a normal vote.
