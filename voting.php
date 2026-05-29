@@ -168,7 +168,7 @@ class Config {
                 // and a default is provided,
                 if (!is_null($default)) {
                     return $default; // return the provided default.
-                } elseif (defined("DEFAULT_{$key}")) { // Or use a `defined(DEFAULT_*)` if present,
+                } elseif (defined("DEFAULT_{$key}")) { // Or use a `define(DEFAULT_*)`d if present,
                     return constant("DEFAULT_{$key}");
                 } else {
                     throw $e; // Otherwise this was a required config, with no global or call-time default, so throw.
@@ -207,9 +207,8 @@ class Config {
      * Use whatever backing storage is appropriate. A wrapper around the
      * lower-level `load_define` and `load_env` helpers. Prefers env vars
      * but also checks defined PHP constants as a fallback for backwards
-     * compatibility. Calls to load() without a $default are treated as
-     * required, and throw an InvalidArgumentException when the key can't
-     * be found.
+     * compatibility. Calls to load() are treated as required, and throw 
+     * an InvalidArgumentException when the key can't be found.
      *
      * @param string $key
      * @return mixed
