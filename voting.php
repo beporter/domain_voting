@@ -2176,6 +2176,7 @@ class PostDataProcessor
     {
         $domain = Domain::fromPost($data);
         $domain->vote_count += 1; // The act of suggesting a domain counts as a vote.
+        $domain->weight_cached = $this->gen->rowWeight($domain);
         $result = $this->db->addDomain($domain);
         if ($result) {
             Flash::add("Domain added with an initial vote! <code>{$result}</code> (ID: <code>{$result->id}</code>)", 'success');
@@ -2193,10 +2194,10 @@ class PostDataProcessor
      */
     protected function update_availability(array $_): string
     {
-        $LIMIT = 20;
+        $LIMIT = 40; // Artifical braking mechanism to avoid web servers rudely shutting this long-running process down.
         // All in seconds.
-        $AVG_CALL_DURATION = 15;
-        $DELAY = (int)Config::read('RATE_LIMIT_PAUSE_SECS');
+        $AVG_CALL_DURATION = 12;
+        $DELAY = (int)Config::read('RATE_LIMIT_PAUSE_SECS', 1);
 
         $totalCount = $this->db->count('votes', '
             enabled IS TRUE
